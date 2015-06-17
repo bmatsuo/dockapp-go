@@ -12,24 +12,10 @@ import (
 	"time"
 )
 
-/*
-func main() {
-	p, err := Poll(time.Second)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		time.Sleep(10 * time.Second)
-		p.Stop()
-	}()
-	for delta := range Delta(p.C) {
-		fmt.Println()
-		for _, cpu := range delta {
-			fmt.Printf("%s %.03g\n", cpu.Name, UtilFrac(cpu))
-		}
-	}
+type CPU interface {
+	Name() string
+	FracUtil() float64
 }
-*/
 
 const (
 	ModeIdle = 3
@@ -68,6 +54,7 @@ func Delta(c <-chan []*Time) <-chan []*Time {
 type Poller struct {
 	tick  *time.Ticker
 	C     chan []*Time
+	stop  chan struct{}
 	times []*Time
 }
 
@@ -79,6 +66,7 @@ func Poll(dur time.Duration) (*Poller, error) {
 	p := &Poller{
 		tick:  time.NewTicker(dur),
 		C:     make(chan []*Time, 1),
+		stop:  make(chan struct{}),
 		times: timesInit,
 	}
 	go p.loop()
@@ -87,6 +75,7 @@ func Poll(dur time.Duration) (*Poller, error) {
 
 func (p *Poller) Stop() {
 	p.tick.Stop()
+	close(p.stop)
 }
 
 func (p *Poller) poll() bool {
@@ -100,9 +89,12 @@ func (p *Poller) poll() bool {
 }
 
 func (p *Poller) loop() {
+	defer close(p.C)
 	var c chan []*Time
 	for {
 		select {
+		case <-p.stop:
+			return
 		case <-p.tick.C:
 			if p.poll() {
 				c = p.C
@@ -114,7 +106,7 @@ func (p *Poller) loop() {
 }
 
 type Time struct {
-	Name   string
+	name   string
 	InMode []int64
 }
 
@@ -138,7 +130,7 @@ func readTime(r io.Reader) ([]*Time, error) {
 		}
 		pieces := strings.Fields(scanner.Text())
 		t := &Time{
-			Name: pieces[0],
+			name: pieces[0],
 		}
 		times = append(times, t)
 		for _, piece := range pieces[1:] {
@@ -156,9 +148,13 @@ func readTime(r io.Reader) ([]*Time, error) {
 	return times, nil
 }
 
+func (t *Time) Name() string {
+	return t.name
+}
+
 func (t1 *Time) Sub(t2 *Time) *Time {
 	t3 := &Time{
-		Name:   t1.Name,
+		name:   t1.name,
 		InMode: append([]int64(nil), t1.InMode...),
 	}
 	for i, dur := range t2.InMode {
@@ -176,6 +172,47 @@ func (t *Time) Frac(mode int) float64 {
 	return idle / total
 }
 
-func UtilFrac(t *Time) float64 {
+func (t *Time) FracUtil() float64 {
 	return 1 - t.Frac(ModeIdle)
+}
+
+func TimeToCPU(times <-chan []*Time) <-chan []CPU {
+	c := make(chan []CPU)
+	go func() {
+		defer close(c)
+		for times := range times {
+			var cpus []CPU
+			for _, t := range times {
+				cpus = append(cpus, t)
+			}
+			c <- cpus
+		}
+	}()
+	return c
+}
+
+func FilterCPU(cpus <-chan []CPU, ignore []string) <-chan []CPU {
+	if len(ignore) == 0 {
+		return cpus
+	}
+
+	c := make(chan []CPU)
+	go func() {
+		defer close(c)
+		for cpus := range cpus {
+			var _cpus []CPU
+			for _, t := range cpus {
+				for _, name := range ignore {
+					if t.Name() == name {
+						continue
+					}
+					_cpus = append(_cpus, t)
+				}
+			}
+			cpus = _cpus
+			c <- cpus
+		}
+	}()
+
+	return c
 }
