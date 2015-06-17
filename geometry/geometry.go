@@ -8,6 +8,12 @@ import (
 	"strconv"
 )
 
+func Contract(r image.Rectangle, pt image.Point) image.Rectangle {
+	r.Min = r.Min.Add(pt)
+	r.Max = r.Max.Sub(pt)
+	return r
+}
+
 // this isn't very fun.  but i don't really feel like writing a parser.
 var geomRegexp = regexp.MustCompile(`^(?:(\d+)x(\d+))?(?:([+-]\d+)([+-]\d+))?$`)
 
