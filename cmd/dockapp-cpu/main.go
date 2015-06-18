@@ -41,7 +41,6 @@ func main() {
 	}()
 	window := geometry.Flag("window.geometry", image.Rect(0, 0, 100, 20), "window geometry in pixels")
 	ignore := flag.String("ignore", "", "comma separated list of cpus to ignore")
-	borderThickness := flag.Int("border", 1, "battery border thickness in pixels")
 	flag.Parse()
 
 	poll, err := Poll(time.Second)
@@ -55,13 +54,7 @@ func main() {
 		deltaCPU = FilterCPU(deltaCPU, ignores)
 	}
 
-	// configure the application window layout
-	layout := &AppLayout{
-		rect:   *window,
-		Border: *borderThickness,
-	}
-
-	app := NewApp(layout)
+	app := NewApp()
 
 	// Connect to the x server and create a dockapp window for the process.
 	X, err := xgbutil.NewConn()
@@ -107,6 +100,10 @@ func main() {
 func RunApp(dockapp *dockapp.DockApp, app *App, delta <-chan []CPU) {
 	defer close(app.done)
 
+	img := dockapp.Canvas()
+	app.Draw(img, nil)
+	dockapp.FlushImage()
+
 	var cpus []CPU
 	var ok bool
 	var cpuNamesOld []string
@@ -135,29 +132,20 @@ func RunApp(dockapp *dockapp.DockApp, app *App, delta <-chan []CPU) {
 		}
 
 		// draw the widget to the screen.
-		err := app.Draw(dockapp.Canvas(), cpus)
-		if err != nil {
-			log.Panic(err)
-		}
+		app.Draw(dockapp.Canvas(), cpus)
 		dockapp.FlushImage()
 	}
 }
 
-type AppLayout struct {
-	rect   image.Rectangle
-	Border int
-}
-
 type App struct {
-	done    chan struct{}
-	DrawCPU func(draw.Image, image.Rectangle, CPU) error
-	Layout  *AppLayout
+	done       chan struct{}
+	Background image.Image
+	Renderer   Renderer
 }
 
-func NewApp(layout *AppLayout) *App {
+func NewApp() *App {
 	app := &App{
-		done:   make(chan struct{}),
-		Layout: layout,
+		done: make(chan struct{}),
 	}
 	return app
 }
@@ -166,21 +154,25 @@ func (app *App) Done() <-chan struct{} {
 	return app.done
 }
 
-var white = image.NewUniform(color.White)
-var black = image.NewUniform(color.Black)
-var transparent = image.NewUniform(color.Transparent)
-var opaque = image.NewUniform(color.Opaque)
-
-func (app *App) drawCPU(img draw.Image, rect image.Rectangle, cpu CPU) error {
-	if app.DrawCPU != nil {
-		return app.DrawCPU(img, rect, cpu)
+func (app *App) renderCPU(img draw.Image, cpu CPU) {
+	r := DefaultRenderer
+	if app.Renderer != nil {
+		r = app.Renderer
 	}
-	return DrawCPU(img, rect, app.Layout.Border, cpu)
+	r.RenderCPU(img, cpu)
 }
 
-func (app *App) Draw(img draw.Image, cpus []CPU) error {
-	rect := app.Layout.rect
-	draw.Draw(img, rect, image.Black, image.Point{}, draw.Over)
+func (app *App) Draw(img draw.Image, cpus []CPU) {
+	rect := img.Bounds()
+	bg := app.Background
+	if bg == nil {
+		bg = image.Black
+	}
+	draw.Draw(img, rect, bg, bg.Bounds().Min, draw.Over)
+
+	if len(cpus) == 0 {
+		return
+	}
 
 	cpuDx := rect.Dx() / len(cpus)
 	ptIncr := image.Point{X: cpuDx}
@@ -195,28 +187,155 @@ func (app *App) Draw(img draw.Image, cpus []CPU) error {
 			Min: rectDx.Min.Add(ptDelta),
 			Max: rectDx.Max.Add(ptDelta),
 		}
-		contract := image.Pt(app.Layout.Border, app.Layout.Border)
-		irect = geometry.Contract(irect, contract)
-
-		err := app.drawCPU(img, irect, cpu)
-		if err != nil {
-			return err
-		}
+		subimg := SubImage(img, irect)
+		app.renderCPU(subimg, cpu)
 
 		ptDelta = ptDelta.Add(ptIncr)
 	}
-	return nil
 }
 
-func DrawCPU(img draw.Image, rect image.Rectangle, border int, cpu CPU) error {
-	draw.Draw(img, rect, image.White, image.Point{}, draw.Over)
+type Renderer interface {
+	RenderCPU(draw.Image, CPU)
+}
 
-	utilizedHeight := int(float64(rect.Dy()) * cpu.FracUtil())
-	utilizedRect := image.Rectangle{
-		Min: rect.Min.Add(image.Point{Y: rect.Dy() - utilizedHeight}),
-		Max: rect.Max,
+type Border struct {
+	Size     int
+	Color    color.Color
+	Renderer Renderer
+}
+
+func (b *Border) RenderCPU(img draw.Image, cpu CPU) {
+	rect := img.Bounds()
+	interior := geometry.Contract(rect, image.Pt(b.Size, b.Size))
+	mask := MaskInside(interior)
+	draw.DrawMask(img, rect, image.NewUniform(b.Color), image.ZP, mask, rect.Min, draw.Over)
+	sub := SubImage(img, interior)
+	b.Renderer.RenderCPU(sub, cpu)
+}
+
+type BackgroundRenderer struct {
+	Color    color.Color
+	Renderer Renderer
+}
+
+func (bg *BackgroundRenderer) RenderCPU(img draw.Image, cpu CPU) {
+	draw.Draw(img, img.Bounds(), image.NewUniform(bg.Color), image.ZP, draw.Over)
+	bg.Renderer.RenderCPU(img, cpu)
+}
+
+type FractionRenderer struct {
+	Horizontal bool
+	Renderer   Renderer
+}
+
+func (frac *FractionRenderer) RenderCPU(img draw.Image, cpu CPU) {
+	rect := img.Bounds()
+
+	utilized := cpu.FracUtil()
+	utilizedHeight := int(float64(rect.Dy()) * utilized)
+	yoffset := rect.Dy() - utilizedHeight
+	rect.Min = rect.Min.Add(image.Pt(0, yoffset))
+	img = SubImage(img, rect)
+
+	frac.Renderer.RenderCPU(img, cpu)
+}
+
+type SimpleGradient struct {
+	C1, C2 color.Color
+}
+
+func (grad *SimpleGradient) RenderCPU(img draw.Image, cpu CPU) {
+
+	r1, g1, b1, a1 := grad.C1.RGBA()
+	r2, g2, b2, a2 := grad.C2.RGBA()
+
+	const M = 0xFFFF
+	m := uint32(cpu.FracUtil() * float64(M))
+	// The resultant red value is a blend of dstr and srcr, and ranges in [0, M].
+	// The calculation for green, blue and alpha is similar.
+	r := (r1*(M-m) + r2*m) / M
+	g := (g1*(M-m) + g2*m) / M
+	b := (b1*(M-m) + b2*m) / M
+	a := (a1*(M-m) + a2*m) / M
+
+	utilColor := color.RGBA64{
+		R: uint16(r),
+		G: uint16(g),
+		B: uint16(b),
+		A: uint16(a),
 	}
-	draw.Draw(img, utilizedRect, image.NewUniform(color.RGBA{0xff, 0, 0, 0xff}), image.Point{}, draw.Over)
 
-	return nil
+	draw.Draw(img, img.Bounds(), image.NewUniform(utilColor), image.ZP, draw.Over)
+}
+
+var DefaultRenderer Renderer = &BackgroundRenderer{
+	Color: color.White,
+	Renderer: &Border{
+		Size:  1,
+		Color: color.Black,
+		Renderer: &FractionRenderer{
+			Renderer: &SimpleGradient{
+				C1: color.RGBA{G: 0xff, A: 0xff},
+				C2: color.RGBA{R: 0xff, A: 0xff},
+			},
+		},
+	},
+}
+
+// SubImage produces a subimage of img as seen through r.  Attempts to draw
+// outside of r (or img) have no effect.
+func SubImage(img draw.Image, r image.Rectangle) draw.Image {
+	r = img.Bounds().Intersect(r)
+	return &drawSubImage{img, r}
+}
+
+type drawSubImage struct {
+	img draw.Image
+	r   image.Rectangle
+}
+
+func (img *drawSubImage) ColorModel() color.Model {
+	return img.img.ColorModel()
+}
+
+func (img *drawSubImage) Bounds() image.Rectangle {
+	return img.r
+}
+
+func (img *drawSubImage) At(x, y int) color.Color {
+	if image.Pt(x, y).In(img.r) {
+		return img.img.At(x, y)
+	}
+	panic("color at out of bounds index")
+}
+
+func (img *drawSubImage) Set(x, y int, c color.Color) {
+	if image.Pt(x, y).In(img.r) {
+		img.img.Set(x, y, c)
+	}
+}
+
+type Mask struct {
+	image.Image
+	R      image.Rectangle
+	Inside bool
+}
+
+func MaskInside(r image.Rectangle) *Mask {
+	return &Mask{image.Opaque, r, true}
+}
+
+func MaskOutside(r image.Rectangle) *Mask {
+	return &Mask{image.Opaque, r, false}
+}
+
+func (m *Mask) At(x, y int) color.Color {
+	inR := image.Pt(x, y).In(m.R)
+	if inR && m.Inside {
+		return color.Transparent
+	}
+	if !inR && !m.Inside {
+		return color.Transparent
+	}
+	return m.Image.At(x, y)
 }
