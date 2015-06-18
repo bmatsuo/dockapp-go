@@ -43,6 +43,7 @@ func (app *DockApp) Quit() {
 // Destroy does not close the underlying connection with the x server.
 func (app *DockApp) Destroy() {
 	app.img.Destroy()
+	app.win.Detach()
 	app.win.Destroy()
 }
 

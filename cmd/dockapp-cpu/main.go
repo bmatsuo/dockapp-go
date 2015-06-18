@@ -69,32 +69,39 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer dockapp.Destroy()
-	defer dockapp.Quit()
-	// map the window and start the main event loop
-	go dockapp.Main()
 
 	// begin the main draw loop. the draw loop receives updates in the form of
 	// new battery metrics and formatters.  The event loop will exit if the
 	// draw loop ever terminates.
 	go RunApp(dockapp, app, deltaCPU)
 
-	var timeout <-chan time.Time
-	for {
-		select {
-		case s := <-sig:
-			signal.Stop(sig)
+	go func() {
+		defer log.Print("!!!")
+		defer func() {
+			go func() {
+				time.Sleep(5 * time.Second)
+				panic("bababa")
+			}()
+			dockapp.Quit()
+		}()
+		defer log.Print("!!")
+		defer dockapp.Destroy()
+		for {
+			select {
+			case s := <-sig:
+				signal.Stop(sig)
 
-			log.Printf("signal received: %s", s)
+				log.Printf("signal received: %s", s)
 
-			poll.Stop()
-			timeout = time.After(time.Second)
-		case <-timeout:
-			panic("timeout")
-		case <-app.Done():
-			return
+				poll.Stop()
+			case <-app.Done():
+				return
+			}
 		}
-	}
+	}()
+
+	// map the window and start the main event loop
+	dockapp.Main()
 }
 
 func RunApp(dockapp *dockapp.DockApp, app *App, delta <-chan []CPU) {
