@@ -206,7 +206,7 @@ type Border struct {
 
 func (b *Border) RenderCPU(img draw.Image, cpu CPU) {
 	rect := img.Bounds()
-	interior := geometry.Contract(rect, image.Pt(b.Size, b.Size))
+	interior := geometry.Contract(rect, b.Size)
 	mask := MaskInside(interior)
 	draw.DrawMask(img, rect, image.NewUniform(b.Color), image.ZP, mask, rect.Min, draw.Over)
 	sub := SubImage(img, interior)

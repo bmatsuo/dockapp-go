@@ -8,10 +8,25 @@ import (
 	"strconv"
 )
 
-func Contract(r image.Rectangle, pt image.Point) image.Rectangle {
-	r.Min = r.Min.Add(pt)
-	r.Max = r.Max.Sub(pt)
-	return r
+// Contract returns a rectangle resulting from contracting r by x on each side.
+func Contract(r image.Rectangle, n int) image.Rectangle {
+	return Contract2(r, n, n)
+}
+
+// Contract2 returns a rectangle resulting from contracting r by x in each side
+// and y on top and bottom.  The rectangle returned by Contract2 has the same
+// center of mass as r.
+func Contract2(r image.Rectangle, x, y int) image.Rectangle {
+	return Contract4(r, x, y, x, y)
+}
+
+// Contract4 returns a rectangle resulting from adding image.Pt(xmin, ymin) to
+// r.Min and subtracting image.Pt(xmax, ymax) from r.Max.
+func Contract4(r image.Rectangle, xmin, ymin, xmax, ymax int) image.Rectangle {
+	return image.Rectangle{
+		Min: r.Min.Add(image.Pt(xmin, ymin)),
+		Max: r.Max.Sub(image.Pt(xmax, ymax)),
+	}
 }
 
 // this isn't very fun.  but i don't really feel like writing a parser.
