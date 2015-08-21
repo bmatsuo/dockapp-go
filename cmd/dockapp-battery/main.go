@@ -105,8 +105,8 @@ import (
 
 	"github.com/AmandaCameron/gobar/utils/dbus/upower"
 	"github.com/BurntSushi/xgbutil"
-	"github.com/bmatsuo/sandbox/dockapp-go/dockapp"
-	"github.com/bmatsuo/sandbox/dockapp-go/geometry"
+	"github.com/bmatsuo/dockapp-go/dockapp"
+	"github.com/bmatsuo/dockapp-go/geometry"
 )
 
 var defaultFormatters = []MetricFormatter{
