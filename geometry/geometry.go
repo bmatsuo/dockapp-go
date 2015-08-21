@@ -6,6 +6,9 @@ import (
 	"image"
 	"regexp"
 	"strconv"
+	"unicode"
+
+	"github.com/bmatsuo/go-lexer"
 )
 
 // Contract returns a rectangle resulting from contracting r by x on each side.
@@ -98,4 +101,115 @@ func (v *flagValue) Set(s string) error {
 	}
 	*v.rect = rect
 	return nil
+}
+
+func parseGeometry(s string) (image.Rectangle, error) {
+	lex := lexer.New(lexGeometry, s)
+
+	xdim, err := _parseInt(lex.Next())
+	if err != nil {
+		return image.ZR, err
+	}
+	ydim, err := _parseInt(lex.Next())
+	if err != nil {
+		return image.ZR, err
+	}
+	xoffset, err := _parseInt(lex.Next())
+	if err == errEOF {
+		r := image.Rect(0, 0, xdim, ydim)
+		return r, nil
+	}
+	if err != nil {
+		return image.ZR, err
+	}
+	yoffset, err := _parseInt(lex.Next())
+	if err != nil {
+		return image.ZR, err
+	}
+
+	item := lex.Next()
+	err = item.Err()
+	if err != nil {
+		return image.ZR, err
+	}
+	if item.Type != lexer.ItemEOF {
+		return image.ZR, fmt.Errorf("geometry: expected end of input")
+	}
+
+	r := image.Rect(xoffset, yoffset, xdim+xoffset, ydim+yoffset)
+	return r, nil
+}
+
+var errEOF = fmt.Errorf("EOF")
+
+func _parseInt(item *lexer.Item) (int, error) {
+	err := item.Err()
+	if err != nil {
+		return 0, err
+	}
+	if item.Type == lexer.ItemEOF {
+		return 0, errEOF
+	}
+	x, err := strconv.ParseInt(item.Value, 10, 0)
+	return int(x), err
+}
+
+const (
+	itemDimension lexer.ItemType = iota
+	itemOffset
+)
+
+func lexGeometry(lex *lexer.Lexer) lexer.StateFn {
+	if !_lexDimension(lex) {
+		return lex.Errorf("geometry: expected width")
+	}
+	if !lex.Accept("x") {
+		return lex.Errorf("geometry: expected delimiter 'x'")
+	}
+	lex.Ignore()
+	if !_lexDimension(lex) {
+		return lex.Errorf("geometry: expected height")
+	}
+
+	return lexOffset
+}
+
+func lexOffset(lex *lexer.Lexer) lexer.StateFn {
+	if !_lexOffset(lex) {
+		if lex.Current() != "" {
+			return lex.Errorf("geometry: expected x offset")
+		}
+		if lexer.IsEOF(lex.Peek()) {
+			return nil
+		}
+		return lex.Errorf("geometry: expected x offset")
+	}
+	if !_lexOffset(lex) {
+		return lex.Errorf("geometry: expected y offset")
+	}
+
+	if !lexer.IsEOF(lex.Peek()) {
+		return lex.Errorf("geometry: expected end of input")
+	}
+
+	return nil
+}
+
+func _lexDimension(lex *lexer.Lexer) bool {
+	if lex.AcceptRunFunc(unicode.IsDigit) == 0 {
+		return false
+	}
+	lex.Emit(itemDimension)
+	return true
+}
+
+func _lexOffset(lex *lexer.Lexer) bool {
+	if !lex.Accept("-+") {
+		return false
+	}
+	if lex.AcceptRunFunc(unicode.IsDigit) == 0 {
+		return false
+	}
+	lex.Emit(itemOffset)
+	return true
 }
