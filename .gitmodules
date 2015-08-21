@@ -1,0 +1,9 @@
+[submodule "vendor/github.com/BurntSushi/xgbutil"]
+	path = vendor/github.com/BurntSushi/xgbutil
+	url = git@github.com:BurntSushi/xgbutil.git
+[submodule "vendor/github.com/bmatsuo/go-lexer"]
+	path = vendor/github.com/bmatsuo/go-lexer
+	url = git@github.com:bmatsuo/go-lexer.git
+[submodule "vendor/github.com/AmandaCameron/gobar"]
+	path = vendor/github.com/AmandaCameron/gobar
+	url = git@github.com:AmandaCameron/gobar.git
