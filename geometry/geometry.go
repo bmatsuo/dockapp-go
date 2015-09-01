@@ -32,11 +32,6 @@ func Contract4(r image.Rectangle, xmin, ymin, xmax, ymax int) image.Rectangle {
 	}
 }
 
-func Format(r image.Rectangle) string {
-	size := r.Size()
-	return fmt.Sprintf("%dx%d%+d%+d", size.X, size.Y, r.Min.X, r.Min.Y)
-}
-
 // this isn't very fun.  but i don't really feel like writing a parser.
 var geomRegexp = regexp.MustCompile(`^(?:(\d+)x(\d+))?(?:([+-]\d+)([+-]\d+))?$`)
 
