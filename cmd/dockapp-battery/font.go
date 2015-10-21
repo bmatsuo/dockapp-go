@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"code.google.com/p/jamslam-freetype-go/freetype"
-	"code.google.com/p/jamslam-freetype-go/freetype/truetype"
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
 )
 
 func ReadFontFile(path string) (*truetype.Font, error) {

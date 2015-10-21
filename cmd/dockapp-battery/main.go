@@ -100,14 +100,13 @@ import (
 	"log"
 	"time"
 
-	"code.google.com/p/jamslam-freetype-go/freetype"
-	"code.google.com/p/jamslam-freetype-go/freetype/truetype"
-
 	"github.com/BurntSushi/xgbutil"
 	"github.com/bmatsuo/dockapp-go/cmd/dockapp-battery/battery"
 	"github.com/bmatsuo/dockapp-go/cmd/dockapp-battery/creeperguage"
 	"github.com/bmatsuo/dockapp-go/dockapp"
 	"github.com/bmatsuo/dockapp-go/geometry"
+	"github.com/golang/freetype"
+	"github.com/golang/freetype/truetype"
 )
 
 var defaultFormatters = []battery.MetricFormatter{
@@ -344,7 +343,6 @@ func (app *App) drawBattery(img draw.Image, metrics *battery.Metrics) {
 }
 
 func (app *App) drawText(img draw.Image, metrics *battery.Metrics, f battery.MetricFormatter) error {
-	app.tt.SetDst(img)
 	// measure the text so that it can be centered within the text area.  if f
 	// is a MaxMetricFormatter use it's MaxFormattedWidth method to determine
 	// the appropriate centering position so that a change metric values (but
@@ -356,21 +354,28 @@ func (app *App) drawText(img draw.Image, metrics *battery.Metrics, f battery.Met
 	// appears that the proper height can be determined using the commented
 	// line of code.
 	text := f.Format(metrics)
-	measuretext := text
-	if fmax, ok := f.(battery.MaxMetricFormatter); ok {
-		measuretext = fmax.MaxFormattedWidth()
-	}
-	ttwidthr, _, err := app.tt.MeasureString(measuretext)
-	if err != nil {
-		return fmt.Errorf("measure: %v", err)
-	}
-	ttwidth := int(ttwidthr >> 8)
-	ttheight := int(app.tt.PointToFix32(12) >> 8)
-	padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
+	//measuretext := text
+	//if fmax, ok := f.(battery.MaxMetricFormatter); ok {
+	//	measuretext = fmax.MaxFormattedWidth()
+	//}
+	//rec := &imageRecorder{
+	//	c:    color.RGBA64Model,
+	//	rect: image.Rect(-1000, -1000, 1000, 1000),
+	//}
+	//app.tt.SetDst(rec)
+	//_, err := app.tt.DrawString(measuretext, freetype.Pt(0, 0))
+	//if err != nil {
+	//	return fmt.Errorf("measure: %v", err)
+	//}
+	//ttwidthr := rec.rdraw.Bounds().Size().X
+	//ttwidth := int(ttwidthr >> 8)
+	//padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
+	app.tt.SetDst(img)
+	ttheight := int(app.tt.PointToFixed(app.Layout.fontSize) >> 6)
 	padtop := (app.Layout.textRect.Size().Y - ttheight) / 2
-	x := app.Layout.textRect.Min.X + padleft
+	x := app.Layout.textRect.Min.X //+ padleft
 	y := app.Layout.textRect.Min.Y + ttheight + padtop
-	_, err = app.tt.DrawString(text, freetype.Pt(x, y))
+	_, err := app.tt.DrawString(text, freetype.Pt(x, y))
 	if err != nil {
 		return fmt.Errorf("draw string: %v", err)
 	}
@@ -398,4 +403,42 @@ func DefaultEnergyColor(metrics *battery.Metrics) color.Color {
 		ecolor = defaultRed
 	}
 	return ecolor
+}
+
+type imageRecorder struct {
+	c     color.Model
+	rect  image.Rectangle
+	rdraw *image.Rectangle
+}
+
+func (r *imageRecorder) ColorModel() color.Model {
+	return r.c
+}
+
+func (r *imageRecorder) Bounds() image.Rectangle {
+	return r.rect
+}
+
+func (r *imageRecorder) At(x, y int) color.Color {
+	return r.c.Convert(color.Black)
+}
+
+func (r *imageRecorder) Set(x, y int, c color.Color) {
+	if r.rdraw == nil {
+		rect := image.Rect(x, y, x, y)
+		r.rdraw = &rect
+	} else {
+		if x < r.rdraw.Min.X {
+			r.rdraw.Min.X = x
+		}
+		if x > r.rdraw.Max.X {
+			r.rdraw.Max.X = x
+		}
+		if y < r.rdraw.Min.Y {
+			r.rdraw.Min.Y = y
+		}
+		if y > r.rdraw.Max.Y {
+			r.rdraw.Max.Y = y
+		}
+	}
 }
