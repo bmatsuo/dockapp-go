@@ -103,16 +103,17 @@ import (
 	"code.google.com/p/jamslam-freetype-go/freetype"
 	"code.google.com/p/jamslam-freetype-go/freetype/truetype"
 
-	"github.com/AmandaCameron/gobar/utils/dbus/upower"
 	"github.com/BurntSushi/xgbutil"
+	"github.com/bmatsuo/dockapp-go/cmd/dockapp-battery/battery"
+	"github.com/bmatsuo/dockapp-go/cmd/dockapp-battery/creeperguage"
 	"github.com/bmatsuo/dockapp-go/dockapp"
 	"github.com/bmatsuo/dockapp-go/geometry"
 )
 
-var defaultFormatters = []MetricFormatter{
-	MetricFormatFunc(BatteryState),
-	MetricFormatFunc(BatteryPercent),
-	MetricFormatFunc(BatteryRemaining),
+var defaultFormatters = []battery.MetricFormatter{
+	battery.MetricFormatFunc(battery.FormatState),
+	battery.MetricFormatFunc(battery.FormatPercent),
+	battery.MetricFormatFunc(battery.FormatRemaining),
 }
 
 func main() {
@@ -126,9 +127,9 @@ func main() {
 	flag.Parse()
 
 	// remaining arguments are text formatters to rotate between
-	var formatters []MetricFormatter
+	var formatters []battery.MetricFormatter
 	for _, tsrc := range flag.Args() {
-		t, err := BatteryMetricTemplate(tsrc)
+		t, err := battery.FormatMetricTemplate(tsrc)
 		if err != nil {
 			log.Fatalf("template: %v %q", err, tsrc)
 		}
@@ -175,19 +176,19 @@ func main() {
 
 	// begin profiling the battery.  prime the profile by immediately calling
 	// the Metrics method.
-	metricsc := make(chan *BatteryMetrics, 1)
-	guage, err := NewGobarBatteryGuage()
+	metricsc := make(chan *battery.Metrics, 1)
+	guage, err := creeperguage.NewCreeperBatteryGuage()
 	if err != nil {
 		log.Fatal(err)
 	}
-	batt := NewBatteryProfiler(guage)
+	batt := battery.NewProfiler(guage)
 	go batt.Start(time.Minute, metricsc)
 	defer batt.Stop()
 
 	// rotate through all provided formatters (or the default set), sending
 	// them to the draw loop at the specified interval.
-	formatterc := make(chan MetricFormatter, 1)
-	go RotateMetricsFormat(*textInterval, formatterc, formatters...)
+	formatterc := make(chan battery.MetricFormatter, 1)
+	go battery.RotateMetricsFormat(*textInterval, formatterc, formatters...)
 
 	// begin the main draw loop. the draw loop receives updates in the form of
 	// new battery metrics and formatters.  The event loop will exit if the
@@ -198,10 +199,10 @@ func main() {
 	dockapp.Main()
 }
 
-func RunApp(dockapp *dockapp.DockApp, app *App, metrics <-chan *BatteryMetrics, formatter <-chan MetricFormatter) {
+func RunApp(dockapp *dockapp.DockApp, app *App, metrics <-chan *battery.Metrics, formatter <-chan battery.MetricFormatter) {
 	defer dockapp.Quit()
-	var m *BatteryMetrics
-	var f MetricFormatter
+	var m *battery.Metrics
+	var f battery.MetricFormatter
 	for {
 		select {
 		case m = <-metrics:
@@ -237,7 +238,7 @@ type AppLayout struct {
 type App struct {
 	Layout       *AppLayout
 	BatteryColor color.Color
-	EnergyColor  func(*BatteryMetrics) color.Color
+	EnergyColor  func(*battery.Metrics) color.Color
 	maskBattery  image.Image
 	maskEnergy   image.Image
 	minEnergy    int
@@ -311,13 +312,13 @@ func (app *App) initLayout() {
 	app.maxEnergy = bodyMaskRect.Max.X
 }
 
-func (app *App) Draw(img draw.Image, metrics *BatteryMetrics, f MetricFormatter) error {
+func (app *App) Draw(img draw.Image, metrics *battery.Metrics, f battery.MetricFormatter) error {
 	draw.Draw(img, app.Layout.rect, white, image.Point{}, draw.Over)
 	app.drawBattery(img, metrics)
 	return app.drawText(img, metrics, f)
 }
 
-func (app *App) drawBattery(img draw.Image, metrics *BatteryMetrics) {
+func (app *App) drawBattery(img draw.Image, metrics *battery.Metrics) {
 	var zeropt image.Point
 
 	// shrink the rectangle in which energy is drawn to account for thickness
@@ -342,7 +343,7 @@ func (app *App) drawBattery(img draw.Image, metrics *BatteryMetrics) {
 	draw.DrawMask(img, app.Layout.battRect, image.NewUniform(app.BatteryColor), zeropt, app.maskBattery, app.Layout.battRect.Min, draw.Over)
 }
 
-func (app *App) drawText(img draw.Image, metrics *BatteryMetrics, f MetricFormatter) error {
+func (app *App) drawText(img draw.Image, metrics *battery.Metrics, f battery.MetricFormatter) error {
 	app.tt.SetDst(img)
 	// measure the text so that it can be centered within the text area.  if f
 	// is a MaxMetricFormatter use it's MaxFormattedWidth method to determine
@@ -356,7 +357,7 @@ func (app *App) drawText(img draw.Image, metrics *BatteryMetrics, f MetricFormat
 	// line of code.
 	text := f.Format(metrics)
 	measuretext := text
-	if fmax, ok := f.(MaxMetricFormatter); ok {
+	if fmax, ok := f.(battery.MaxMetricFormatter); ok {
 		measuretext = fmax.MaxFormattedWidth()
 	}
 	ttwidthr, _, err := app.tt.MeasureString(measuretext)
@@ -389,9 +390,9 @@ var defaultRed = color.RGBA{R: 0xff, G: 0x80, B: 0x80, A: 0xff}
 var defaultGreen = color.RGBA{R: 0x80, G: 0xff, B: 0x80, A: 0xff}
 var defaultYellow = color.RGBA{R: 0xef, G: 0xef, B: 0x40, A: 0xff}
 
-func DefaultEnergyColor(metrics *BatteryMetrics) color.Color {
+func DefaultEnergyColor(metrics *battery.Metrics) color.Color {
 	ecolor := defaultGreen
-	if metrics.State == upower.Charging || metrics.State == upower.PendingCharge {
+	if metrics.State == battery.Charging || metrics.State == battery.PendingCharge {
 		ecolor = defaultYellow
 	} else if metrics.Fraction <= 0.15 {
 		ecolor = defaultRed
