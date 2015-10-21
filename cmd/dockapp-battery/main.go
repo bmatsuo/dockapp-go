@@ -176,13 +176,13 @@ func main() {
 	// begin profiling the battery.  prime the profile by immediately calling
 	// the Metrics method.
 	metricsc := make(chan *BatteryMetrics, 1)
-	batt, err := NewBatteryProfiler()
+	guage, err := NewGobarBatteryGuage()
 	if err != nil {
 		log.Fatal(err)
 	}
+	batt := NewBatteryProfiler(guage)
 	go batt.Start(time.Minute, metricsc)
 	defer batt.Stop()
-	batt.Metrics()
 
 	// rotate through all provided formatters (or the default set), sending
 	// them to the draw loop at the specified interval.

@@ -14,126 +14,205 @@ import (
 	"launchpad.net/~jamesh/go-dbus/trunk"
 )
 
-type BatteryProfiler struct {
-	conn    *dbus.Connection
-	upower  *upower.UPower
-	dev     *upower.Device
-	connect chan struct{}
-	stop    chan struct{}
-	ping    chan chan *BatteryMetrics
+// BatteryGuage is an interface that can derive metrics for the computer's
+// battery.
+type BatteryGuage interface {
+	BatteryMetrics() (*BatteryMetrics, error)
+}
 
-	mut     sync.Mutex
+// BatteryStateNotifier complements a BatteryGuage by sending over
+// notifications when the battery "connected" state has changed.
+type BatteryStateNotifier interface {
+	BatteryStateChange(notifications chan<- struct{}) (stop func())
+}
+
+// BatteryProfiler is a BatteryGuage that periodically polls an underlying
+// BatteryGuage.
+type BatteryProfiler struct {
+	g      BatteryGuage
+	change chan struct{}
+	stop   chan struct{}
+
+	mut     sync.RWMutex
 	metrics *BatteryMetrics
 }
 
-func NewBatteryProfiler() (*BatteryProfiler, error) {
-	var err error
+// NewBatteryProfiler returns a new BatteryProfiler that periodically polls g.
+func NewBatteryProfiler(g BatteryGuage) *BatteryProfiler {
 	b := new(BatteryProfiler)
-	b.connect = make(chan struct{})
 	b.stop = make(chan struct{})
-	b.ping = make(chan chan *BatteryMetrics)
-	b.conn, err = dbus.Connect(dbus.SystemBus)
-	if err != nil {
-		return nil, fmt.Errorf("connect: %v", err)
-	}
-	b.upower = upower.New(b.conn)
-	b.dev, err = b.upower.GetBattery()
-	if err != nil {
-		return nil, fmt.Errorf("battery: %v", err)
-	}
-	return b, nil
+	b.g = g
+	return b
 }
 
+// Start begins polling the underlying BatteryGuage at the specified interval
+// and sends BatteryMetrics over c.
 func (b *BatteryProfiler) Start(interval time.Duration, c chan<- *BatteryMetrics) {
-	b.watchConnect()
+	watchStop := b.watchBatteryState()
+	defer watchStop()
+
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
-	var ping chan<- *BatteryMetrics
+
+	refreshing := false
+	refreshed := make(chan error, 1)
+	refresh := func() { refreshed <- b.refreshMetrics() }
+
+	refreshing = true
+	refresh()
+
 	for {
 		// either stop or refresh the metrics and attempt to notify c
 		select {
 		case <-b.stop:
 			return
-		case ping = <-b.ping:
-		case <-b.connect:
+		case <-b.change:
+			if !refreshing {
+				refreshing = true
+				go refresh()
+			}
 		case <-tick.C:
-		}
-		err := b.refreshMetrics()
-		if err != nil {
-			log.Print(err)
-		}
-		m := b.metrics
-		select {
-		case c <- m:
-		default:
-		}
-		if ping != nil {
-			ping <- m
-			ping = nil
+			if !refreshing {
+				refreshing = true
+				go refresh()
+			}
+		case err := <-refreshed:
+			refreshing = false
+			if err != nil {
+				log.Print(err)
+			}
+			select {
+			case c <- b.batteryMetrics():
+			default:
+			}
 		}
 	}
 }
 
+func (b *BatteryProfiler) watchBatteryState() func() {
+	if notf, ok := b.g.(BatteryStateNotifier); ok {
+		b.change = make(chan struct{})
+		return notf.BatteryStateChange(b.change)
+	}
+	return func() {} // noop
+}
+
+// Stop prevents future poll events.
 func (b *BatteryProfiler) Stop() {
 	close(b.stop)
 }
 
-func (b *BatteryProfiler) watchConnect() {
-	b.dev.Connect(func(*upower.Device) {
-		b.connect <- struct{}{}
-	})
-}
-
 func (b *BatteryProfiler) refreshMetrics() error {
-	var m BatteryMetrics
-	var err error
-	m.State, err = b.dev.State()
+	m, err := b.g.BatteryMetrics()
 	if err != nil {
-		return fmt.Errorf("state: %v", err)
+		return err
 	}
-
-	secUntilEmpty, err := b.dev.Properties.Get("org.freedesktop.UPower", "TimeToEmpty")
-	if err != nil {
-		return fmt.Errorf("until empty: %v", err)
-	}
-	untilEmpty64, ok := secUntilEmpty.(int64)
-	if !ok {
-		return fmt.Errorf("until empty: not an int64")
-	}
-	untilEmpty := time.Duration(untilEmpty64) * time.Second
-	m.UntilEmpty = &untilEmpty
-
-	secUntilFull, err := b.dev.Properties.Get("org.freedesktop.UPower", "TimeToFull")
-	if err != nil {
-		return fmt.Errorf("until full: %v", err)
-	}
-	untilFull64, ok := secUntilFull.(int64)
-	if !ok {
-		return fmt.Errorf("until full: not an int64")
-	}
-	untilFull := time.Duration(untilFull64) * time.Second
-	m.UntilFull = &untilFull
-
-	percent, err := b.dev.Charge()
-	if err != nil {
-		return fmt.Errorf("charge: %v", err)
-	}
-	m.Fraction = percent / 100
-
 	b.mut.Lock()
-	b.metrics = &m
+	b.metrics = m
 	b.mut.Unlock()
-
 	return nil
 }
 
-func (b *BatteryProfiler) Metrics() *BatteryMetrics {
-	resp := make(chan *BatteryMetrics, 1)
-	b.ping <- resp
-	m := <-resp
+func (b *BatteryProfiler) batteryMetrics() *BatteryMetrics {
+	b.mut.RLock()
+	m := b.metrics
+	b.mut.RUnlock()
 	return m
 }
 
+// BatteryMetrics implements the BatteryGuage interface and returns cached
+// metrics from the underlying BatteryGuage.
+func (b *BatteryProfiler) BatteryMetrics() (*BatteryMetrics, error) {
+	return b.batteryMetrics(), nil
+}
+
+// GobarBatteryGuage uses the gobar upower interface to retrieve battery
+// metrics.
+type GobarBatteryGuage struct {
+	conn   *dbus.Connection
+	upower *upower.UPower
+	dev    *upower.Device
+}
+
+// NewGobarBatteryGuage connects to the dbus system bus
+func NewGobarBatteryGuage() (*GobarBatteryGuage, error) {
+	g := &GobarBatteryGuage{}
+	var err error
+	g.conn, err = dbus.Connect(dbus.SystemBus)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %v", err)
+	}
+	g.upower = upower.New(g.conn)
+	g.dev, err = g.upower.GetBattery()
+	if err != nil {
+		return nil, fmt.Errorf("battery: %v", err)
+	}
+	return g, nil
+}
+
+// BatteryMetrics reads and return metrics from the upower interface.
+func (g *GobarBatteryGuage) BatteryMetrics() (*BatteryMetrics, error) {
+	state, err := g.dev.State()
+	if err != nil {
+		return nil, fmt.Errorf("state: %v", err)
+	}
+	percent, err := g.dev.Charge()
+	if err != nil {
+		return nil, fmt.Errorf("charge: %v", err)
+	}
+	untilEmpty, err := g.propDurSec("org.freedesktop.UPower", "TimeToEmpty")
+	if err != nil {
+		return nil, fmt.Errorf("until empty: %v", err)
+	}
+	untilFull, err := g.propDurSec("org.freedesktop.UPower", "TimeToFull")
+	if err != nil {
+		return nil, fmt.Errorf("until full: %v", err)
+	}
+
+	m := &BatteryMetrics{
+		State:      state,
+		Fraction:   percent / 100,
+		UntilEmpty: &untilEmpty,
+		UntilFull:  &untilFull,
+	}
+
+	return m, nil
+}
+
+func (g *GobarBatteryGuage) propDurSec(i, s string) (time.Duration, error) {
+	x, err := g.propInt64(i, s)
+	if err != nil {
+		return 0, err
+	}
+	dur := time.Duration(x) * time.Second
+	return dur, nil
+}
+
+func (g *GobarBatteryGuage) propInt64(i, s string) (int64, error) {
+	v, err := g.dev.Properties.Get(i, s)
+	if err != nil {
+		return 0, err
+	}
+	x, ok := v.(int64)
+	if !ok {
+		return 0, fmt.Errorf("not an int64")
+	}
+	return x, nil
+}
+
+// BatteryStateChange implements the BatteryStateNotifier interface.
+func (g *GobarBatteryGuage) BatteryStateChange(notf chan<- struct{}) (stop func()) {
+	_done := make(chan struct{})
+	g.dev.Connect(func(*upower.Device) {
+		select {
+		case <-_done:
+		case notf <- struct{}{}:
+		}
+	})
+	return func() { close(_done) }
+}
+
+// BatteryMetrics describes the set state of the computer's battery.
 type BatteryMetrics struct {
 	Fraction   float64
 	State      upower.DeviceState
@@ -141,6 +220,7 @@ type BatteryMetrics struct {
 	UntilFull  *time.Duration
 }
 
+// MetricFormatter returns a readable string from BatteryMetrics.
 // TODO:
 // Modify to return a possible error.
 type MetricFormatter interface {
@@ -149,14 +229,18 @@ type MetricFormatter interface {
 	Format(m *BatteryMetrics) string
 }
 
+// MaxMetricFormatter helps layout engines determine the size required to
+// graphically render BatteryMetrics.
 type MaxMetricFormatter interface {
 	// MaxFormattedWidth returns a string that approximates the width of the
 	// formatted output.
 	MaxFormattedWidth() string
 }
 
+// MetricFormatFunc is a function that implements the MetricFormatter interface.
 type MetricFormatFunc func(*BatteryMetrics) string
 
+// Format implements the MetricFormatter interface.
 func (fn MetricFormatFunc) Format(m *BatteryMetrics) string {
 	return fn(m)
 }
@@ -206,20 +290,27 @@ func (f *templateMetricFormatter) Format(m *BatteryMetrics) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(f.buf.String())), " ")
 }
 
+// BatteryMetricTemplate renders BatteryMetrics using the template string s.
+//
 // BUG:
 // Template errors can not be intercepted.  They are only logged.
 func BatteryMetricTemplate(s string) (MetricFormatter, error) {
 	return newTemplateMetricFormatter(s)
 }
 
+// SimpleMetricsFormat is a simple MetricsFormatter.
 func SimpleMetricsFormat(m *BatteryMetrics) string {
 	return fmt.Sprintf("%2d%% %s", roundBiasLow(m.Fraction*100), cleanDurationString(*m.UntilEmpty))
 }
 
+// BatteryPercent renders the battery level as an integral percentage.
 func BatteryPercent(m *BatteryMetrics) string {
 	return fmt.Sprintf("%d%%", roundBiasLow(m.Fraction*100))
 }
 
+// BatteryRemaining returns a human readable string describing the time until
+// the battery is empty/full.  If the battery is empty then "Empty" is
+// returned.  If the battery is full then "Full" is returned.
 func BatteryRemaining(m *BatteryMetrics) string {
 	switch m.State {
 	case upower.Charging:
@@ -259,14 +350,17 @@ func cleanDurationString(d time.Duration) string {
 	return s
 }
 
+// roundBiasLow rounds x to an integer with a bias toward -Inf.
 func roundBiasLow(x float64) int {
 	return int(math.Ceil(x - 0.5))
 }
 
+// BatteryState returns the string representation of a battery's state.
 func BatteryState(m *BatteryMetrics) string {
 	return m.State.String()
 }
 
+// RotateMetricsFormat sends an f over c every interval.
 func RotateMetricsFormat(interval time.Duration, c chan<- MetricFormatter, f ...MetricFormatter) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
