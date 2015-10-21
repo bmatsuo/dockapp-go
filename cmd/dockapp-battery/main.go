@@ -98,6 +98,7 @@ import (
 	"image/color"
 	"image/draw"
 	"log"
+	"math"
 	"time"
 
 	"github.com/BurntSushi/xgbutil"
@@ -345,37 +346,37 @@ func (app *App) drawBattery(img draw.Image, metrics *battery.Metrics) {
 func (app *App) drawText(img draw.Image, metrics *battery.Metrics, f battery.MetricFormatter) error {
 	// measure the text so that it can be centered within the text area.  if f
 	// is a MaxMetricFormatter use it's MaxFormattedWidth method to determine
-	// the appropriate centering position so that a change metric values (but
-	// not formatter) will have a smooth transition in the ui.
+	// the appropriate centering position so that a change in metric values
+	// (but not formatter) will have a smooth transition in the ui.
 	//
 	// BUG:
-	// The MeasureString computation appears to yield an incorrect height.  The
-	// resulting text rendered in the window is not centered vertically.  It
-	// appears that the proper height can be determined using the commented
-	// line of code.
+	// The computed bounds from the imageRecorder do not seem to agree with the
+	// offset returned by app.tt.DrawString().  The bounding box is dependent
+	// on the origin argument passed to the method.  But the offset returned
+	// appears to be consistent regardless of the origin point and destination
+	// image size.  However the returned offset does not account for all glyphs
+	// and may be slightly innacturate (e.g. when the text style is italic).
 	text := f.Format(metrics)
-	//measuretext := text
-	//if fmax, ok := f.(battery.MaxMetricFormatter); ok {
-	//	measuretext = fmax.MaxFormattedWidth()
-	//}
-	//rec := &imageRecorder{
-	//	c:    color.RGBA64Model,
-	//	rect: image.Rect(-1000, -1000, 1000, 1000),
-	//}
-	//app.tt.SetDst(rec)
-	//_, err := app.tt.DrawString(measuretext, freetype.Pt(0, 0))
-	//if err != nil {
-	//	return fmt.Errorf("measure: %v", err)
-	//}
-	//ttwidthr := rec.rdraw.Bounds().Size().X
-	//ttwidth := int(ttwidthr >> 8)
-	//padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
+	measuretext := text
+	if fmax, ok := f.(battery.MaxMetricFormatter); ok {
+		measuretext = fmax.MaxFormattedWidth()
+	}
+	log.Printf("measure: %q", measuretext)
+	rec := &imageRecorder{c: color.RGBA64Model}
+	app.tt.SetDst(rec)
+	offset, err := app.tt.DrawString(measuretext, freetype.Pt(0, 0))
+	if err != nil {
+		return fmt.Errorf("measure: %v", err)
+	}
+
 	app.tt.SetDst(img)
+	ttwidth := int(offset.X >> 6)
+	padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
 	ttheight := int(app.tt.PointToFixed(app.Layout.fontSize) >> 6)
 	padtop := (app.Layout.textRect.Size().Y - ttheight) / 2
-	x := app.Layout.textRect.Min.X //+ padleft
+	x := app.Layout.textRect.Min.X + padleft
 	y := app.Layout.textRect.Min.Y + ttheight + padtop
-	_, err := app.tt.DrawString(text, freetype.Pt(x, y))
+	_, err = app.tt.DrawString(text, freetype.Pt(x, y))
 	if err != nil {
 		return fmt.Errorf("draw string: %v", err)
 	}
@@ -407,7 +408,6 @@ func DefaultEnergyColor(metrics *battery.Metrics) color.Color {
 
 type imageRecorder struct {
 	c     color.Model
-	rect  image.Rectangle
 	rdraw *image.Rectangle
 }
 
@@ -416,17 +416,22 @@ func (r *imageRecorder) ColorModel() color.Model {
 }
 
 func (r *imageRecorder) Bounds() image.Rectangle {
-	return r.rect
+	return image.Rectangle{
+		Min: image.Pt(int(math.MinInt32), int(math.MinInt32)),
+		Max: image.Pt(int(math.MaxInt32), int(math.MaxInt32)),
+	}
 }
 
 func (r *imageRecorder) At(x, y int) color.Color {
-	return r.c.Convert(color.Black)
+	return r.c.Convert(color.White)
 }
 
 func (r *imageRecorder) Set(x, y int, c color.Color) {
 	if r.rdraw == nil {
-		rect := image.Rect(x, y, x, y)
-		r.rdraw = &rect
+		r.rdraw = &image.Rectangle{
+			Min: image.Pt(x, y),
+			Max: image.Pt(x, y),
+		}
 	} else {
 		if x < r.rdraw.Min.X {
 			r.rdraw.Min.X = x
