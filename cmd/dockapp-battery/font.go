@@ -11,8 +11,20 @@ import (
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font"
 )
 
+// ReadFaceFile parses the contents of path as a truetype font.
+func ReadFaceFile(path string, opt *truetype.Options) (font.Face, error) {
+	ttf, err := ReadFontFile(path)
+	if err != nil {
+		return nil, err
+	}
+	face := truetype.NewFace(ttf, opt)
+	return face, nil
+}
+
+// ReadFontFile parses the contents of path as a truetype font.
 func ReadFontFile(path string) (*truetype.Font, error) {
 	if ext := filepath.Ext(path); ext != ".ttf" {
 		return nil, fmt.Errorf("cannot %s file as a font", ext)
@@ -25,6 +37,17 @@ func ReadFontFile(path string) (*truetype.Font, error) {
 	return ReadFont(f)
 }
 
+// ReadFace parses the data read from r as a truetype font.
+func ReadFace(r io.Reader, opt *truetype.Options) (font.Face, error) {
+	ttf, err := ReadFont(r)
+	if err != nil {
+		return nil, err
+	}
+	face := truetype.NewFace(ttf, opt)
+	return face, nil
+}
+
+// ReadFont parses the data read from r as a truetype font.
 func ReadFont(r io.Reader) (*truetype.Font, error) {
 	ttfraw, err := ioutil.ReadAll(r)
 	if err != nil {

@@ -93,7 +93,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -108,6 +107,8 @@ import (
 	"github.com/bmatsuo/dockapp-go/geometry"
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font"
+	"golang.org/x/image/math/fixed"
 )
 
 var defaultFormatters = []battery.MetricFormatter{
@@ -225,6 +226,7 @@ func RunApp(dockapp *dockapp.DockApp, app *App, metrics <-chan *battery.Metrics,
 	}
 }
 
+// AppLayout is configuration the defines the relative geometries of
 type AppLayout struct {
 	rect      image.Rectangle
 	battRect  image.Rectangle
@@ -235,6 +237,7 @@ type AppLayout struct {
 	DPI       float64
 }
 
+// App is the battery dockapp.
 type App struct {
 	Layout       *AppLayout
 	BatteryColor color.Color
@@ -244,8 +247,10 @@ type App struct {
 	minEnergy    int
 	maxEnergy    int
 	tt           *freetype.Context
+	font         *font.Drawer
 }
 
+// NewApp returns a new dockapp.
 func NewApp(layout *AppLayout) *App {
 	app := &App{
 		Layout:       layout,
@@ -303,6 +308,13 @@ func (app *App) initLayout() {
 	app.tt.SetDPI(app.Layout.DPI)
 	app.tt.SetFont(app.Layout.font)
 	app.tt.SetFontSize(app.Layout.fontSize)
+	app.font = &font.Drawer{
+		Src: black,
+		Face: truetype.NewFace(app.Layout.font, &truetype.Options{
+			Size: app.Layout.fontSize,
+			DPI:  app.Layout.DPI,
+		}),
+	}
 
 	// the rectangle in which energy is drawn needs to account for thickness to
 	// make the visible percentage more accurate.  after adjustment reduce the
@@ -348,38 +360,21 @@ func (app *App) drawText(img draw.Image, metrics *battery.Metrics, f battery.Met
 	// is a MaxMetricFormatter use it's MaxFormattedWidth method to determine
 	// the appropriate centering position so that a change in metric values
 	// (but not formatter) will have a smooth transition in the ui.
-	//
-	// BUG:
-	// The computed bounds from the imageRecorder do not seem to agree with the
-	// offset returned by app.tt.DrawString().  The bounding box is dependent
-	// on the origin argument passed to the method.  But the offset returned
-	// appears to be consistent regardless of the origin point and destination
-	// image size.  However the returned offset does not account for all glyphs
-	// and may be slightly innacturate (e.g. when the text style is italic).
+	app.font.Dst = img
 	text := f.Format(metrics)
 	measuretext := text
 	if fmax, ok := f.(battery.MaxMetricFormatter); ok {
 		measuretext = fmax.MaxFormattedWidth()
 	}
-	log.Printf("measure: %q", measuretext)
-	rec := &imageRecorder{c: color.RGBA64Model}
-	app.tt.SetDst(rec)
-	offset, err := app.tt.DrawString(measuretext, freetype.Pt(0, 0))
-	if err != nil {
-		return fmt.Errorf("measure: %v", err)
-	}
-
-	app.tt.SetDst(img)
-	ttwidth := int(offset.X >> 6)
-	padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
+	xoffset := app.font.MeasureString(measuretext)
+	ttwidth := int(xoffset >> 6)
 	ttheight := int(app.tt.PointToFixed(app.Layout.fontSize) >> 6)
+	padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
 	padtop := (app.Layout.textRect.Size().Y - ttheight) / 2
 	x := app.Layout.textRect.Min.X + padleft
 	y := app.Layout.textRect.Min.Y + ttheight + padtop
-	_, err = app.tt.DrawString(text, freetype.Pt(x, y))
-	if err != nil {
-		return fmt.Errorf("draw string: %v", err)
-	}
+	app.font.Dot = fixed.P(x, y)
+	app.font.DrawString(text)
 	return nil
 }
 
