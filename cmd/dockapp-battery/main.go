@@ -309,12 +309,14 @@ func (app *App) initLayout() {
 	app.tt.SetDPI(app.Layout.DPI)
 	app.tt.SetFont(app.Layout.font)
 	app.tt.SetFontSize(app.Layout.fontSize)
+	ttopt := &truetype.Options{
+		Size: app.Layout.fontSize,
+		DPI:  app.Layout.DPI,
+	}
+	ttface := truetype.NewFace(app.Layout.font, ttopt)
 	app.font = &font.Drawer{
-		Src: black,
-		Face: truetype.NewFace(app.Layout.font, &truetype.Options{
-			Size: app.Layout.fontSize,
-			DPI:  app.Layout.DPI,
-		}),
+		Src:  black,
+		Face: ttface,
 	}
 
 	// the rectangle in which energy is drawn needs to account for thickness to
@@ -374,7 +376,7 @@ func (app *App) drawText(img draw.Image, metrics *battery.Metrics, f battery.Met
 	padleft := (app.Layout.textRect.Size().X - ttwidth) / 2
 	padtop := (app.Layout.textRect.Size().Y - ttheight) / 2
 	x := app.Layout.textRect.Min.X + padleft
-	y := app.Layout.textRect.Min.Y + ttheight + padtop
+	y := app.Layout.textRect.Max.Y - padtop
 	app.font.Dot = fixed.P(x, y)
 	app.font.DrawString(text)
 	return nil
