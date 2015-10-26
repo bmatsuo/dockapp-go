@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"image"
-	"regexp"
 	"strconv"
 	"unicode"
 
@@ -32,36 +31,9 @@ func Contract4(r image.Rectangle, xmin, ymin, xmax, ymax int) image.Rectangle {
 	}
 }
 
-// this isn't very fun.  but i don't really feel like writing a parser.
-var geomRegexp = regexp.MustCompile(`^(?:(\d+)x(\d+))?(?:([+-]\d+)([+-]\d+))?$`)
-
 // Parse returns an image.Rectangle corresponding to the given geometry string.
 func Parse(geom string) (rect image.Rectangle, err error) {
-	if geom == "" {
-		return rect, fmt.Errorf("empty string")
-	}
-	subs := geomRegexp.FindAllStringSubmatch(geom, -1)
-	if len(subs) < 1 {
-		return rect, fmt.Errorf("invalid geometry")
-	}
-
-	// parse subvalues as integers and assign to size and offet points which
-	// describe the rectangle.
-	var size image.Point
-	var off image.Point
-	if subs[0][1] != "" {
-		size.X, _ = strconv.Atoi(subs[0][1])
-		size.Y, _ = strconv.Atoi(subs[0][2])
-	}
-	if subs[0][3] != "" {
-		off.X, _ = strconv.Atoi(subs[0][3])
-		off.Y, _ = strconv.Atoi(subs[0][4])
-	}
-
-	rect.Max = size
-	rect = rect.Add(off)
-
-	return rect, nil
+	return parseGeometry(geom)
 }
 
 // Format renders the given image.Rectangle as a geometry string.

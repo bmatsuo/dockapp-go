@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestParseGeometry(t *testing.T) {
+func TestParse(t *testing.T) {
 	for i, test := range []struct {
 		s string
 		r image.Rectangle
@@ -25,7 +25,7 @@ func TestParseGeometry(t *testing.T) {
 	}
 }
 
-func TestParseGeometryError(t *testing.T) {
+func TestParse_error(t *testing.T) {
 	for i, test := range []struct {
 		s       string
 		errtext string
@@ -49,20 +49,7 @@ func TestParseGeometryError(t *testing.T) {
 	}
 }
 
-func BenchmarkParseGeometry_regexp(b *testing.B) {
-	expect := image.Rect(1920, 0, 1920+1920, 1080)
-	for i := 0; i < b.N; i++ {
-		geom, err := Parse("1920x1080+1920+0")
-		if err != nil {
-			b.Fatal(err)
-		}
-		if geom != expect {
-			b.Fatalf("%v (expect %v)", geom, expect)
-		}
-	}
-}
-
-func BenchmarkParseGeometry(b *testing.B) {
+func BenchmarkParse(b *testing.B) {
 	expect := image.Rect(1920, 0, 1920+1920, 1080)
 	for i := 0; i < b.N; i++ {
 		geom, err := parseGeometry("1920x1080+1920+0")
