@@ -53,10 +53,10 @@ func (app *DockApp) FlushImage() {
 	app.img.XPaint(app.win.Id)
 }
 
-// NewDockApp allocates and initializes a new DockApp.  NewDockApp does not
-// initialize the window contents and does not map the window to the display
-// screen.  The window is mapped to the screen when the Main method is called
-// on the returned DockApp.
+// New allocates and initializes a new DockApp.  NewDockApp does not initialize
+// the window contents and does not map the window to the display screen.  The
+// window is mapped to the screen when the Main method is called on the
+// returned DockApp.
 func New(x *xgbutil.XUtil, rect image.Rectangle) (*DockApp, error) {
 	win, err := xwindow.Generate(x)
 	if err != nil {

@@ -200,6 +200,7 @@ func main() {
 	dockapp.Main()
 }
 
+// RunApp runs the main loop for the application.
 func RunApp(dockapp *dockapp.DockApp, app *App, metrics <-chan *battery.Metrics, formatter <-chan battery.MetricFormatter) {
 	defer dockapp.Quit()
 	var m *battery.Metrics
@@ -324,6 +325,7 @@ func (app *App) initLayout() {
 	app.maxEnergy = bodyMaskRect.Max.X
 }
 
+// Draw renders metrics in the application window with the given formatter.
 func (app *App) Draw(img draw.Image, metrics *battery.Metrics, f battery.MetricFormatter) error {
 	draw.Draw(img, app.Layout.rect, white, image.Point{}, draw.Over)
 	app.drawBattery(img, metrics)
@@ -391,6 +393,8 @@ var defaultRed = color.RGBA{R: 0xff, G: 0x80, B: 0x80, A: 0xff}
 var defaultGreen = color.RGBA{R: 0x80, G: 0xff, B: 0x80, A: 0xff}
 var defaultYellow = color.RGBA{R: 0xef, G: 0xef, B: 0x40, A: 0xff}
 
+// DefaultEnergyColor returns the default rendering color for battery "energy"
+// with the given metrics.
 func DefaultEnergyColor(metrics *battery.Metrics) color.Color {
 	ecolor := defaultGreen
 	if metrics.State == battery.Charging || metrics.State == battery.PendingCharge {

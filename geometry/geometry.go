@@ -35,6 +35,7 @@ func Contract4(r image.Rectangle, xmin, ymin, xmax, ymax int) image.Rectangle {
 // this isn't very fun.  but i don't really feel like writing a parser.
 var geomRegexp = regexp.MustCompile(`^(?:(\d+)x(\d+))?(?:([+-]\d+)([+-]\d+))?$`)
 
+// Parse returns an image.Rectangle corresponding to the given geometry string.
 func Parse(geom string) (rect image.Rectangle, err error) {
 	if geom == "" {
 		return rect, fmt.Errorf("empty string")
@@ -63,6 +64,7 @@ func Parse(geom string) (rect image.Rectangle, err error) {
 	return rect, nil
 }
 
+// Format renders the given image.Rectangle as a geometry string.
 func Format(rect image.Rectangle) string {
 	if rect.Min.Eq(image.Point{}) {
 		return fmt.Sprintf("%dx%d", rect.Max.X, rect.Max.Y)
@@ -70,6 +72,7 @@ func Format(rect image.Rectangle) string {
 	return fmt.Sprintf("%dx%d%+d%+d", rect.Dx(), rect.Dy(), rect.Min.X, rect.Min.Y)
 }
 
+// Flag registers name with the flag package.
 func Flag(name string, def image.Rectangle, usage string) *image.Rectangle {
 	v := &flagValue{
 		rect: &image.Rectangle{},
@@ -79,6 +82,8 @@ func Flag(name string, def image.Rectangle, usage string) *image.Rectangle {
 	return v.rect
 }
 
+// FlagVar is like Flag but takes the pointer to an image.Rectangle for
+// assignment.
 func FlagVar(r *image.Rectangle, name string, def image.Rectangle, usage string) {
 	v := &flagValue{
 		rect: &def,

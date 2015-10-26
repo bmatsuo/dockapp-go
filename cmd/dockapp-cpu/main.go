@@ -97,6 +97,7 @@ func main() {
 	}
 }
 
+// RunApp is the main loop for the application.
 func RunApp(dockapp *dockapp.DockApp, app *App, delta <-chan []CPU) {
 	defer close(app.done)
 
@@ -137,12 +138,14 @@ func RunApp(dockapp *dockapp.DockApp, app *App, delta <-chan []CPU) {
 	}
 }
 
+// App graphically renders CPU utilization.
 type App struct {
 	done       chan struct{}
 	Background image.Image
 	Renderer   Renderer
 }
 
+// NewApp returns a newly created App.
 func NewApp() *App {
 	app := &App{
 		done: make(chan struct{}),
@@ -150,6 +153,7 @@ func NewApp() *App {
 	return app
 }
 
+// Done returns a channel than is closed when the app has shut down.
 func (app *App) Done() <-chan struct{} {
 	return app.done
 }
@@ -162,6 +166,7 @@ func (app *App) renderCPU(img draw.Image, cpu CPU) {
 	r.RenderCPU(img, cpu)
 }
 
+// Draw renders the given cpu cores on img.
 func (app *App) Draw(img draw.Image, cpus []CPU) {
 	rect := img.Bounds()
 	bg := app.Background
@@ -194,16 +199,19 @@ func (app *App) Draw(img draw.Image, cpus []CPU) {
 	}
 }
 
+// Renderer draws a core's utilization in an image.
 type Renderer interface {
 	RenderCPU(draw.Image, CPU)
 }
 
+// Border is a Renderer implementation.
 type Border struct {
 	Size     int
 	Color    color.Color
 	Renderer Renderer
 }
 
+// RenderCPU implements the Renderer interface.
 func (b *Border) RenderCPU(img draw.Image, cpu CPU) {
 	rect := img.Bounds()
 	interior := geometry.Contract(rect, b.Size)
@@ -213,21 +221,25 @@ func (b *Border) RenderCPU(img draw.Image, cpu CPU) {
 	b.Renderer.RenderCPU(sub, cpu)
 }
 
+// BackgroundRenderer is a Renderer implementation.
 type BackgroundRenderer struct {
 	Color    color.Color
 	Renderer Renderer
 }
 
+// RenderCPU implements the Renderer interface.
 func (bg *BackgroundRenderer) RenderCPU(img draw.Image, cpu CPU) {
 	draw.Draw(img, img.Bounds(), image.NewUniform(bg.Color), image.ZP, draw.Over)
 	bg.Renderer.RenderCPU(img, cpu)
 }
 
+// FractionRenderer is a Renderer implementation.
 type FractionRenderer struct {
 	Horizontal bool
 	Renderer   Renderer
 }
 
+// RenderCPU implements the Renderer interface.
 func (frac *FractionRenderer) RenderCPU(img draw.Image, cpu CPU) {
 	rect := img.Bounds()
 
@@ -240,10 +252,12 @@ func (frac *FractionRenderer) RenderCPU(img draw.Image, cpu CPU) {
 	frac.Renderer.RenderCPU(img, cpu)
 }
 
+// SimpleGradient is a Renderer implementation.
 type SimpleGradient struct {
 	C1, C2 color.Color
 }
 
+// RenderCPU implents the RendererImplementation.
 func (grad *SimpleGradient) RenderCPU(img draw.Image, cpu CPU) {
 
 	r1, g1, b1, a1 := grad.C1.RGBA()
@@ -268,6 +282,8 @@ func (grad *SimpleGradient) RenderCPU(img draw.Image, cpu CPU) {
 	draw.Draw(img, img.Bounds(), image.NewUniform(utilColor), image.ZP, draw.Over)
 }
 
+// DefaultRenderer is the default Renderer implementation used to render CPU
+// utilization.
 var DefaultRenderer Renderer = &BackgroundRenderer{
 	Color: color.White,
 	Renderer: &Border{
@@ -315,20 +331,25 @@ func (img *drawSubImage) Set(x, y int, c color.Color) {
 	}
 }
 
+// Mask is an Image implementation that masks over/around a rectangle.
 type Mask struct {
 	image.Image
 	R      image.Rectangle
 	Inside bool
 }
 
+// MaskInside returns Mask image that is transparent inside r.
 func MaskInside(r image.Rectangle) *Mask {
 	return &Mask{image.Opaque, r, true}
 }
 
+// MaskOutside returns Mask image that is transparent outside r.
 func MaskOutside(r image.Rectangle) *Mask {
 	return &Mask{image.Opaque, r, false}
 }
 
+// At returns either m.Image.At(x, y) or color.Transparent depending on if
+// point (x, y) is masked.
 func (m *Mask) At(x, y int) color.Color {
 	inR := image.Pt(x, y).In(m.R)
 	if inR && m.Inside {
