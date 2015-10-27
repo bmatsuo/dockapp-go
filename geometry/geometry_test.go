@@ -1,6 +1,7 @@
 package geometry
 
 import (
+	"flag"
 	"image"
 	"strings"
 	"testing"
@@ -46,6 +47,38 @@ func TestParse_error(t *testing.T) {
 		if r != image.ZR {
 			t.Errorf("test %d: %v", i, r)
 		}
+	}
+}
+
+func TestFlag(t *testing.T) {
+	if flagfn(nil) == nil {
+		t.Errorf("nil func returned")
+	}
+
+	fs := flag.NewFlagSet("testcmd", flag.ContinueOnError)
+	var r1, r2 *image.Rectangle
+	r2 = &image.Rectangle{}
+	def := image.Rectangle{Min: image.Pt(3, 4), Max: image.Pt(4, 6)} // 1x2+3+4
+	r1 = defineFlag(fs, nil, "t1", def, "the first test")
+	if r1 == nil {
+		t.Errorf("defineFlag returned nil")
+	}
+	r2 = defineFlag(fs, r2, "t2", def, "the second test")
+	if r1 == nil {
+		t.Errorf("defineFlag returned nil")
+	}
+	if r2 != r2 { // pointers should be equal
+		t.Errorf("defineFlag returned a different pointer")
+	}
+	err := fs.Parse([]string{"-t2=1x1+1+1"})
+	if err != nil {
+		t.Errorf("parse error: %v", err)
+	}
+	if *r1 != def {
+		t.Errorf("r1: %#v", *r1)
+	}
+	if *r2 == def {
+		t.Errorf("r2: %#v", r2)
 	}
 }
 

@@ -44,23 +44,36 @@ func Format(rect image.Rectangle) string {
 	return fmt.Sprintf("%dx%d%+d%+d", rect.Dx(), rect.Dy(), rect.Min.X, rect.Min.Y)
 }
 
+var defaultFlagFunc = flag.Var
+
+func flagfn(fs *flag.FlagSet) func(flag.Value, string, string) {
+	if fs != nil {
+		return fs.Var
+	}
+	return defaultFlagFunc
+}
+
+func defineFlag(fs *flag.FlagSet, r *image.Rectangle, name string, def image.Rectangle, usage string) *image.Rectangle {
+	define := flagfn(fs)
+	if r == nil {
+		r = &def
+	} else {
+		*r = def
+	}
+	v := &flagValue{rect: r}
+	define(v, name, usage)
+	return r
+}
+
 // Flag registers name with the flag package.
 func Flag(name string, def image.Rectangle, usage string) *image.Rectangle {
-	v := &flagValue{
-		rect: &image.Rectangle{},
-	}
-	*v.rect = def
-	flag.Var(v, name, usage)
-	return v.rect
+	return defineFlag(nil, nil, name, def, usage)
 }
 
 // FlagVar is like Flag but takes the pointer to an image.Rectangle for
 // assignment.
 func FlagVar(r *image.Rectangle, name string, def image.Rectangle, usage string) {
-	v := &flagValue{
-		rect: &def,
-	}
-	flag.Var(v, name, usage)
+	defineFlag(nil, r, name, def, usage)
 }
 
 type flagValue struct {
