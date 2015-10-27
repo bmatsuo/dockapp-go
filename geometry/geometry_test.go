@@ -77,7 +77,7 @@ func TestFlag(t *testing.T) {
 	if *r1 != def {
 		t.Errorf("r1: %#v", *r1)
 	}
-	if *r2 == def {
+	if *r2 != image.Rect(1, 1, 2, 2) {
 		t.Errorf("r2: %#v", r2)
 	}
 }
